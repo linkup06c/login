@@ -1,11 +1,11 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const cors = require("cors");
-const multer = require("multer");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-require("dotenv").config();
+const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const multer = require('multer');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+require('dotenv').config();
 
 const app = express();
 
@@ -14,7 +14,7 @@ app.use(express.json());
 
 // ================= MONGO =================
 mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("MongoDB conectado"))
+  .then(() => console.log('MongoDB conectado'))
   .catch(err => console.error(err));
 
 // ================= USER =================
@@ -24,6 +24,9 @@ const UserSchema = new mongoose.Schema({
   name: String,
   avatar: String,
 
+  // Código de recuperação
+  recoveryCode: { type: String, unique: true },
+
   profile: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
@@ -32,11 +35,43 @@ const UserSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const User = mongoose.model("User", UserSchema);
+const User = mongoose.model('User', UserSchema);
+
+// ================= FUNÇÕES =================
+function generateRecoveryCode() {
+  const a = Math.floor(1000 + Math.random() * 9000);
+  const b = Math.floor(1000 + Math.random() * 9000);
+  return `SG-${a}-${b}`;
+}
+
+async function createUniqueRecoveryCode() {
+  let code;
+  do {
+    code = generateRecoveryCode();
+  } while (await User.findOne({ recoveryCode: code }));
+  return code;
+}
+
+// ================= AUTH =================
+function auth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+
+  if (!token) {
+    return res.status(401).json({ error: 'Token ausente' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.id;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+}
 
 // ================= R2 =================
 const r2 = new S3Client({
-  region: "auto",
+  region: 'auto',
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -47,14 +82,13 @@ const r2 = new S3Client({
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ================= UPLOAD AVATAR =================
-app.post("/upload-avatar", upload.single("file"), async (req, res) => {
+app.post('/upload-avatar', upload.single('file'), async (req, res) => {
   try {
-
     if (!req.file) {
-      return res.status(400).json({ error: "Arquivo não enviado" });
+      return res.status(400).json({ error: 'Arquivo não enviado' });
     }
 
-    const ext = req.file.originalname.split(".").pop();
+    const ext = req.file.originalname.split('.').pop();
 
     const fileName = `avatars/${Date.now()}-${Math.random()
       .toString(36)
@@ -66,7 +100,7 @@ app.post("/upload-avatar", upload.single("file"), async (req, res) => {
         Key: fileName,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
-        CacheControl: "public, max-age=31536000"
+        CacheControl: 'public, max-age=31536000'
       })
     );
 
@@ -78,14 +112,13 @@ app.post("/upload-avatar", upload.single("file"), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("UPLOAD ERROR:", err);
-    return res.status(500).json({ error: "Erro no upload R2" });
+    console.error('UPLOAD ERROR:', err);
+    return res.status(500).json({ error: 'Erro no upload R2' });
   }
 });
 
 // ================= REGISTER =================
-app.post("/register", async (req, res) => {
-
+app.post('/register', async (req, res) => {
   const {
     email,
     password,
@@ -95,75 +128,67 @@ app.post("/register", async (req, res) => {
   } = req.body;
 
   if (!email || !password || !name) {
-    return res.status(400).json({ error: "Preencha todos os campos" });
+    return res.status(400).json({ error: 'Preencha todos os campos' });
   }
 
   try {
-
     const exists = await User.findOne({ email });
 
     if (exists) {
-      return res.status(400).json({ error: "Email já cadastrado" });
+      return res.status(400).json({ error: 'Email já cadastrado' });
     }
 
     const hash = await bcrypt.hash(password, 10);
+    const recoveryCode = await createUniqueRecoveryCode();
 
     const user = await User.create({
       email,
       password: hash,
       name,
       avatar,
+      recoveryCode,
       profile
     });
 
     return res.json({
       success: true,
+      recoveryCode,
       user: {
         id: user._id,
         name: user.name,
+        email: user.email,
         avatar: user.avatar,
         profile: user.profile
       }
     });
 
   } catch (err) {
-
     console.error(err);
-
-    return res.status(500).json({
-      error: "Erro interno"
-    });
-
+    return res.status(500).json({ error: 'Erro interno' });
   }
-
 });
 
 // ================= LOGIN =================
-app.post("/login", async (req, res) => {
-
+app.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
   try {
-
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(400).json({
-        error: "Usuário não encontrado"
-      });
+      return res.status(400).json({ error: 'Usuário não encontrado' });
     }
 
     const ok = await bcrypt.compare(password, user.password);
 
     if (!ok) {
-      return res.status(401).json({
-        error: "Senha inválida"
-      });
+      return res.status(401).json({ error: 'Senha inválida' });
     }
 
     const token = jwt.sign(
       { id: user._id },
-      process.env.JWT_SECRET
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
     );
 
     return res.json({
@@ -171,26 +196,157 @@ app.post("/login", async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
+        email: user.email,
         avatar: user.avatar,
         profile: user.profile
       }
     });
 
   } catch (err) {
-
     console.error(err);
+    return res.status(500).json({ error: 'Erro interno' });
+  }
+});
 
-    return res.status(500).json({
-      error: "Erro interno"
+// ================= ME =================
+app.get('/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('-password');
+
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    return res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        recoveryCode: user.recoveryCode,
+        profile: user.profile
+      }
     });
 
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// ================= UPDATE PROFILE =================
+app.put('/profile', auth, async (req, res) => {
+  const { name, avatar, profile = {} } = req.body;
+
+  try {
+    const user = await User.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    if (typeof name === 'string') {
+      user.name = name.trim();
+    }
+
+    if (typeof avatar === 'string' && avatar.trim()) {
+      user.avatar = avatar;
+    }
+
+    user.profile = {
+      ...user.profile,
+      ...profile
+    };
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        recoveryCode: user.recoveryCode,
+        profile: user.profile
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// ================= CHANGE PASSWORD =================
+app.put('/change-password', auth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Preencha todos os campos' });
   }
 
+  try {
+    const user = await User.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+
+    if (!ok) {
+      return res.status(401).json({ error: 'Senha atual incorreta' });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'Senha alterada com sucesso'
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// ================= RECOVER WITH CODE =================
+app.post('/recover-with-code', async (req, res) => {
+  const { email, recoveryCode, newPassword } = req.body;
+
+  if (!email || !recoveryCode || !newPassword) {
+    return res.status(400).json({ error: 'Preencha todos os campos' });
+  }
+
+  try {
+    const user = await User.findOne({ email, recoveryCode });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Código inválido' });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'Senha redefinida com sucesso'
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 // ================= START =================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor rodando na porta", PORT);
+  console.log('Servidor rodando na porta', PORT);
 });
