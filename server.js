@@ -962,6 +962,96 @@ error:
 
 
 
+// ================= VERIFY CURRENT PASSWORD =================
+
+app.post(
+'/verify-password',
+auth,
+async(req,res)=>{
+
+
+const {
+    currentPassword
+}=req.body;
+
+
+
+if(!currentPassword){
+
+return res.status(400).json({
+
+    error:
+    'Senha não informada'
+
+});
+
+}
+
+
+
+try{
+
+
+const user =
+await User.findById(
+    req.userId
+);
+
+
+
+if(!user){
+
+
+return res.status(404).json({
+
+    error:
+    'Usuário não encontrado'
+
+});
+
+
+}
+
+
+
+const valid =
+await bcrypt.compare(
+
+currentPassword,
+
+user.password
+
+);
+
+
+
+return res.json({
+
+    valid
+
+});
+
+
+
+}catch(err){
+
+
+console.error(err);
+
+
+return res.status(500).json({
+
+    error:
+    'Erro interno'
+
+});
+
+
+}
+
+
+});
+
 
 // ================= CHANGE PASSWORD =================
 
