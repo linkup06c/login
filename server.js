@@ -1219,6 +1219,21 @@ error:'Preencha todos os campos'
 }
 
 
+const emailValid =
+/^[^\s@]+@[^\s@]+\.[^\s@]+$/
+.test(newEmail);
+
+
+if(!emailValid){
+
+return res.status(400).json({
+
+error:'E-mail inválido'
+
+});
+
+}
+
 try{
 
 
