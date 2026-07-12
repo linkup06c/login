@@ -1102,6 +1102,139 @@ error:
 
 
 
+// ================= CHANGE EMAIL =================
+
+app.put(
+'/change-email',
+auth,
+async(req,res)=>{
+
+const {
+
+currentPassword,
+
+newEmail
+
+}=req.body;
+
+
+if(!currentPassword || !newEmail){
+
+return res.status(400).json({
+
+error:'Preencha todos os campos'
+
+});
+
+}
+
+
+try{
+
+
+const user =
+await User.findById(
+req.userId
+);
+
+
+if(!user){
+
+return res.status(404).json({
+
+error:'Usuário não encontrado'
+
+});
+
+}
+
+
+const ok =
+await bcrypt.compare(
+
+currentPassword,
+
+user.password
+
+);
+
+
+if(!ok){
+
+return res.status(401).json({
+
+error:'Senha atual incorreta'
+
+});
+
+}
+
+
+const exists =
+await User.findOne({
+
+email:newEmail
+
+});
+
+
+if(exists && exists._id.toString() !== user._id.toString()){
+
+return res.status(400).json({
+
+error:'Este e-mail já está em uso'
+
+});
+
+}
+
+
+user.email = newEmail.trim();
+
+await user.save();
+
+
+return res.json({
+
+success:true,
+
+message:'E-mail alterado com sucesso',
+
+user:{
+
+id:user._id,
+
+name:user.name,
+
+email:user.email,
+
+avatar:user.avatar,
+
+recoveryCode:user.recoveryCode,
+
+profile:user.profile
+
+}
+
+});
+
+
+}catch(err){
+
+console.error(err);
+
+return res.status(500).json({
+
+error:'Erro interno'
+
+});
+
+}
+
+});
+
+
+
 
 
 
